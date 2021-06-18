@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  ses-email-forwarding
+
+  SAM template for email forwarding with SES on a verified domain
+
+Globals:
+  Function:
+    Timeout: 30
+Parameters:
+  FromEmailAddress:
+    Type: String
+    AllowedPattern: '^(.+)@(.+)$'
+  ToEmailAddress:
+    Type: String
+    AllowedPattern: '^(.+)@(.+)$'
+Resources:
+  SesEmailForwardingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/ses-email-forwarding.handler
+      Runtime: nodejs14.x
+      Role: !GetAtt EmailForwardingIAMRole.Arn
+      AutoPublishAlias: "live"
+      Events:
+        EmailEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref InboxBucket
+            Events: s3:ObjectCreated:*
+      Environment:
+        Variables:
+          FROM_ADDRESS: !Ref FromEmailAddress
+          FORWARD_ADDRESS: !Ref ToEmailAddress
+  EmailForwardingIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: EmailForwardingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: CloudwatchLogsAccess
+                Effect: Allow
+                Action: 'logs:*'
+                Resource: '*'
+              - Sid: S3Access
+                Effect: Allow
+                Action: 's3:*'
+                Resource: '*'
+              - Sid: SESAccess
+                Effect: Allow
+                Action: 'ses:SendEmail'
+                Resource: '*'
+  InboxBucket:
+    Type: AWS::S3::Bucket
+  
+  InboxBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref InboxBucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - 's3:PutObject'
+            Effect: Allow
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref InboxBucket
+                - /*
+            Principal:
+              Service: 'ses.amazonaws.com'
+            Condition:
+              StringLike:
+                'aws:Referer':
+                  - !Ref AWS::AccountId
+Outputs:
+  InboxBucket:
+    Description: "Inbox Bucket ARN"
+    Value: !GetAtt InboxBucket.Arn
