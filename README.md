@@ -1,17 +1,33 @@
 # AWS SES Email Forwarder
 
-This repo was trimmed and modified from [AWS's Example Serverless App](https://github.com/aws-samples/ses-auto-forward-by-language). It contains a bare-bones serverless architecture to configure email forwarding for a domain you've verified with AWS SES.
+## Summary
 
-**Having a verified domain is a prerequisite to using this code**
+This is a Cloudformation stack that creates a Lambda function, an s3 bucket, and associated roles to allow interaction between Lambda, S3, and SES. The Cloudformation stack makes an application that does the following:
+
+- triggers the Lambda function on object upload to the S3 bucket
+- the Lambda function loads the object from S3 - if the object is not an email file, the function will return an error
+- the Lambda function uses the `mailparser` library's `simpleParser` exported function to parse the email
+- the Lambda function calls the AWS SDK's `ses.sendMail` function to forward the email to a specified forwarding address
+
+This repo was trimmed and modified from [AWS's Example Serverless App](https://github.com/aws-samples/ses-auto-forward-by-language).
 
 **This will only work in the us-east-1 region unless you've moved out of the SES sandbox (if you don't know what this is, just deploy to us-east-1)**
 
+The repo contains the following items:
 - `src` - Code for the application's Lambda function.
 - `events` - Invocation events that you can use to invoke the function.
 - `__tests__` - Unit tests for the application code. 
 - `template.yml` - A template that defines the application's AWS resources.
 
 Resources for this project are defined in the `template.yml` file in this project. You can update the template to add AWS resources through the same deployment process that updates your application code.
+
+## Prerequisites
+
+**Having a verified domain and a verified forwarding address are prerequisites for forwarding email sent to your verified domain.** 
+- See [AWS's SES documentation for details on verifying a domain](https://docs.aws.amazon.com/ses/latest/DeveloperGuide/receiving-email-getting-started-verify.html). 
+- *Note: verifying is a 1-click process if you've purchased/registered the domain through AWS's Route 53 DNS services.*
+
+You will need to provide a `fromEmailAddress` and a `toEmailAddress` during the deployment process. The `fromEmailAddress` can be any address for your verified domain (such as `donotreply@verifieddomain.tld`). The `toEmailAddress` must be a verified address, and it should be the inbox where you will monitor the forwarded mail.
 
 ## Deploy the sample application
 
@@ -39,7 +55,32 @@ The first command will build the source of your application. The second command 
 * **Allow SAM CLI IAM role creation**: Many AWS SAM templates, including this example, create AWS IAM roles required for the AWS Lambda function(s) included to access AWS services. By default, these are scoped down to minimum required permissions. To deploy an AWS CloudFormation stack which creates or modifies IAM roles, the `CAPABILITY_IAM` value for `capabilities` must be provided. If permission isn't provided through this prompt, to deploy this example you must explicitly pass `--capabilities CAPABILITY_IAM` to the `sam deploy` command.
 * **Save arguments to samconfig.toml**: If set to yes, your choices will be saved to a configuration file inside the project, so that in the future you can just re-run `sam deploy` without parameters to deploy changes to your application.
 
-## Use the AWS SAM CLI to build and test locally
+## Configure Receiving Rule in SES
+
+**As mentioned above, you must already have an SES-verified domain in `us-east-1` before you can set up a Receiving Rule for that domain. See [AWS's SES documentation for details on verifying a domain](https://docs.aws.amazon.com/ses/latest/DeveloperGuide/receiving-email-getting-started-verify.html). 
+
+After the Cloudformation application stack is successfully deployed, do the following:
+1. Log into your AWS console and open your SES configuration home page
+
+2. Add a rule - you can create a new rule set or add the rule to an active set
+![](./screenshots/ses-create-rule.png)
+
+3. Add recipient(s) - to catch all email to the verified domain, use `'verifieddomain.tld'` (`i.e. 'example.com'). To catch mail to a subdomain, use `'subdomain.verifieddomain.tld'`.
+![](./screenshots/rule-step-1-recipients.png)
+
+4. Add an S3 Action - be sure to select the s3 bucket that was deployed as part of your Cloudformation stack. You do not need to set a prefix or SNS topic. Encryption is up to you, but beyond the scope of this guide.
+![](./screenshots/rule-step-2-actions.png)
+
+5. Add Rule Details - add a name and choose whether you want to require TLS and/or spam/virus scanning. Also be sure to add the rule to an active rule set (such as the default set).
+![](./screenshots/rule-step-3-details.png)
+
+6. Review and deploy!
+
+You should now be able to send email to your verified domain, and the email will be forwarded to a verified email address that you specified during the Cloudformation stack deployment.
+
+## Additional Details 
+
+### Use the AWS SAM CLI to build and test locally
 
 Build your application by using the `sam build` command.
 
@@ -59,54 +100,15 @@ In order for the function to execute, it must have the proper resources to be ab
 my-application$ sam local invoke handler --event events/s3.json --env-vars env.json
 ```
 
-## Add a resource to your application
-
-The application template uses AWS SAM to define application resources. AWS SAM is an extension of AWS CloudFormation with a simpler syntax for configuring common serverless application resources, such as functions, triggers, and APIs. For resources that aren't included in the [AWS SAM specification](https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md), you can use the standard [AWS CloudFormation resource types](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-template-resource-type-ref.html).
-
-Update `template.yml` to add a dead-letter queue to your application. In the **Resources** section, add a resource named **MyQueue** with the type **AWS::SQS::Queue**. Then add a property to the **AWS::Serverless::Function** resource named **DeadLetterQueue** that targets the queue's Amazon Resource Name (ARN), and a policy that grants the function permission to access the queue.
-
-```
-Resources:
-  MyQueue:
-    Type: AWS::SQS::Queue
-  SesEmailForwardingFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: src/handlers/ses-email-forwarding.handler
-      Runtime: nodejs14.x
-      DeadLetterQueue:
-        Type: SQS
-        TargetArn: !GetAtt MyQueue.Arn
-      Policies:
-        - SQSSendMessagePolicy:
-            QueueName: !GetAtt MyQueue.QueueName
-        - S3NewObjectEvent:
-            Type: S3
-            Properties:
-              Bucket: !Ref AppBucket
-              Events: s3:ObjectCreated:*
-              Filter:
-                S3Key:
-                  Rules:
-                    - Name: suffix
-                      Value: ".json"
-```
-
-The dead-letter queue is a location for Lambda to send events that could not be processed. It's only used if you invoke your function asynchronously, but it's useful here to show how you can modify your application's resources and function configuration.
-
-Deploy the updated application.
-
-```bash
-my-application$ sam deploy
-```
+**Note: if deployment fails, you will need to manually delete the application stack from Cloudformation via the AWS console.**
 
 Open the [**Applications**](https://console.aws.amazon.com/lambda/home#/applications) page of the Lambda console, and choose your application. When the deployment completes, view the application resources on the **Overview** tab to see the new resource. Then, choose the function to see the updated configuration that specifies the dead-letter queue.
 
-## Fetch, tail, and filter Lambda function logs
+### Fetch, tail, and filter Lambda function logs
 
 To simplify troubleshooting, the AWS SAM CLI has a command called `sam logs`. `sam logs` lets you fetch logs that are generated by your Lambda function from the command line. In addition to printing the logs on the terminal, this command has several nifty features to help you quickly find the bug.
 
-**NOTE:** This command works for all Lambda functions, not just the ones you deploy using AWS SAM.
+**NOTE:** This command works for all Lambda functions, not just the ones you deploy using AWS SAM. Be sure to use your custom stack name if you did not accept the default name `sam-app`
 
 ```bash
 my-application$ sam logs -n SesEmailForwardingFunction --stack-name sam-app --tail
@@ -116,7 +118,7 @@ my-application$ sam logs -n SesEmailForwardingFunction --stack-name sam-app --ta
 
 You can find more information and examples about filtering Lambda function logs in the [AWS SAM CLI documentation](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-logging.html).
 
-## Unit tests
+### Unit tests
 
 Tests are defined in the `__tests__` folder in this project. Use `npm` to install the [Jest test framework](https://jestjs.io/) and run unit tests.
 
@@ -125,7 +127,7 @@ my-application$ npm install
 my-application$ npm run test
 ```
 
-## Cleanup
+### Cleanup
 
 To delete the sample application that you created, use the AWS CLI. Assuming you used your project name for the stack name, you can run the following:
 
@@ -133,7 +135,7 @@ To delete the sample application that you created, use the AWS CLI. Assuming you
 aws cloudformation delete-stack --stack-name sam-app
 ```
 
-## Resources
+### Resources
 
 For an introduction to the AWS SAM specification, the AWS SAM CLI, and serverless application concepts, see the [AWS SAM Developer Guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html).
 

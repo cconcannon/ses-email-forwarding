@@ -29,7 +29,7 @@ exports.handler = async (event, context) => {
         },
         Subject: {
           Charset: "UTF-8",
-          Data: parsed.subject
+          Data: `to: ${parsed.to.text} sub: ${parsed.subject}`
         }
       }, 
       Source: process.env.FROM_ADDRESS,
