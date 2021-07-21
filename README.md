@@ -57,7 +57,7 @@ The first command will build the source of your application. The second command 
 
 ## Configure Receiving Rule in SES
 
-**As mentioned above, you must already have an SES-verified domain in `us-east-1` before you can set up a Receiving Rule for that domain. See [AWS's SES documentation for details on verifying a domain](https://docs.aws.amazon.com/ses/latest/DeveloperGuide/receiving-email-getting-started-verify.html). 
+**As mentioned above, you must already have an SES-verified domain in `us-east-1` before you can set up a Receiving Rule for that domain. See [AWS's SES documentation for details on verifying a domain](https://docs.aws.amazon.com/ses/latest/DeveloperGuide/receiving-email-getting-started-verify.html).** 
 
 After the Cloudformation application stack is successfully deployed, do the following:
 1. Log into your AWS console and open your SES configuration home page

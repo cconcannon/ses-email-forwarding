@@ -11,22 +11,14 @@ exports.handler = async (event, context) => {
 
     const file = await s3.getObject({Bucket: bucket, Key: object}).promise();
     const parsed = await simpleParser(file.Body);
+    const bodyObject = makeBodyObject(parsed);
 
     const forwardingParams = {
       Destination: {
         ToAddresses: [process.env.FORWARD_ADDRESS]
       }, 
       Message: {
-        Body: {
-          Html: {
-            Charset: "UTF-8",
-            Data: parsed.html
-          },
-          Text: {
-            Charset: "UTF-8",
-            Data: parsed.text
-          }
-        },
+        Body: bodyObject,
         Subject: {
           Charset: "UTF-8",
           Data: `to: ${parsed.to.text} sub: ${parsed.subject}`
@@ -46,6 +38,28 @@ exports.handler = async (event, context) => {
   }
   return;
 };
+
+function makeBodyObject(parsedEmail) {
+  let body = {};
+
+  if (parsedEmail.html) {
+    bodyObject = {
+      Html: {
+        Charset: "UTF-8",
+        Data: `${parsedEmail.html}`
+      }
+    };
+  } else {
+    bodyObject = {
+      Text: {
+        Charset: "UTF-8",
+        Data: `${parsedEmail.text}`
+      }
+    };
+  }
+
+  return bodyObject;
+}
 
 async function sendEmail(params) {
   return new Promise ((resolve, reject) => {
